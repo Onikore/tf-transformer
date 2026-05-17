@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>TF Transformer — math tests</title>
+<style>
+  body { font: 14px/1.5 monospace; background: #111; color: #ddd; padding: 1rem; }
+  .pass { color: #4ade80; }
+  .fail { color: #f87171; font-weight: bold; }
+  #summary { font-size: 18px; margin: 1rem 0; }
+  li { white-space: pre-wrap; }
+</style>
+<!-- Served via `python -m http.server` at the PROJECT ROOT, so paths are
+     absolute from there. -->
+<script type="importmap">
+{ "imports": { "three": "/frontend/vendor/three/three.module.js" } }
+</script>
+</head>
+<body>
+<h1>TF Transformer — math tests</h1>
+<div id="summary">running…</div>
+<ul id="results"></ul>
+
+<script type="module">
+import * as THREE from 'three';
+import {
+  eulerToQuat, quatToEuler, quatToMatrix3, normalizeQuat,
+  computeWorldMatrices, relativeMatrix,
+} from '/frontend/js/math/transforms.js';
+import {
+  conventionMatrix4, conventionDet, CONVENTIONS,
+} from '/frontend/js/math/conventions.js';
+import { migrateConfig } from '/frontend/js/migrate.js';
+
+let passed = 0, failed = 0;
+const results = document.getElementById('results');
+
+function log(ok, msg) {
+  const li = document.createElement('li');
+  li.className = ok ? 'pass' : 'fail';
+  li.textContent = (ok ? 'PASS  ' : 'FAIL  ') + msg;
+  results.appendChild(li);
+  ok ? passed++ : failed++;
+  if (!ok) console.error(msg);
+}
+
+const close = (a, b) => Math.abs(a - b) <= 1e-6;
+function vecClose(v, [x, y, z], msg) {
+  log(close(v.x, x) && close(v.y, y) && close(v.z, z),
+      `${msg}  got (${v.x.toFixed(4)}, ${v.y.toFixed(4)}, ${v.z.toFixed(4)}) expected (${x}, ${y}, ${z})`);
+}
+const Q = (q) => new THREE.Quaternion(q.x, q.y, q.z, q.w);
+function applyQ(q, x, y, z) {
+  return new THREE.Vector3(x, y, z).applyQuaternion(Q(q));
+}
+function colVec(mat4, col) {
+  const e = mat4.elements; // column-major
+  return new THREE.Vector3(e[col * 4], e[col * 4 + 1], e[col * 4 + 2]);
+}
+
+// --- REP-103 RPY: R = Rz(yaw) Ry(pitch) Rx(roll) -------------------------
+const H = Math.PI / 2;
+vecClose(applyQ(eulerToQuat(0, 0, H), 1, 0, 0), [0, 1, 0],
+         'yaw +90deg maps +X -> +Y');
+vecClose(applyQ(eulerToQuat(0, H, 0), 1, 0, 0), [0, 0, -1],
+         'pitch +90deg maps +X -> -Z');
+vecClose(applyQ(eulerToQuat(H, 0, 0), 0, 1, 0), [0, 0, 1],
+         'roll +90deg maps +Y -> +Z');
+vecClose(applyQ(eulerToQuat(0, 0, 0), 1, 2, 3), [1, 2, 3],
+         'identity rotation is a no-op');
+
+// --- quat <-> euler round-trip ------------------------------------------
+for (const [r, p, y] of [[0.3, -0.7, 1.1], [0, H, 0], [-1.2, 0.4, 2.0]]) {
+  const e = quatToEuler(eulerToQuat(r, p, y));
+  log(close(e.roll, r) && close(e.pitch, p) && close(e.yaw, y),
+      `quatToEuler(eulerToQuat) round-trips (${r}, ${p}, ${y}) -> (${e.roll.toFixed(3)}, ${e.pitch.toFixed(3)}, ${e.yaw.toFixed(3)})`);
+}
+
+// --- quaternion normalization -------------------------------------------
+const n = normalizeQuat({ x: 0, y: 0, z: 0, w: 2 });
+log(close(n.w, 1) && close(n.x, 0), 'normalizeQuat scales (0,0,0,2) -> (0,0,0,1)');
+const z0 = normalizeQuat({ x: 0, y: 0, z: 0, w: 0 });
+log(close(z0.w, 1), 'normalizeQuat falls back to identity for zero-norm');
+
+// --- quat -> 3x3 matrix --------------------------------------------------
+const m = quatToMatrix3(eulerToQuat(0, 0, H)); // yaw 90
+log(close(m[0][0], 0) && close(m[1][0], 1) && close(m[2][2], 1),
+    `quatToMatrix3 yaw90 first column = (0,1,0)  got (${m[0][0].toFixed(3)}, ${m[1][0].toFixed(3)}, ${m[2][0].toFixed(3)})`);
+
+// --- Convention matrices (proper rotations, det = +1) -------------------
+for (const c of CONVENTIONS) {
+  log(close(conventionDet(c), 1), `${c} convention det = +1`);
+}
+vecClose(colVec(conventionMatrix4('ENU'), 0), [1, 0, 0], 'ENU is identity (X)');
+vecClose(colVec(conventionMatrix4('FLU'), 2), [0, 0, 1], 'FLU is identity (Z)');
+vecClose(colVec(conventionMatrix4('NED'), 0), [0, 1, 0], 'NED X(North) -> world +Y');
+vecClose(colVec(conventionMatrix4('NED'), 2), [0, 0, -1], 'NED Z(Down) -> world down');
+vecClose(colVec(conventionMatrix4('FRD'), 1), [0, -1, 0], 'FRD Y(Right) -> world -Y');
+vecClose(colVec(conventionMatrix4('FRD'), 2), [0, 0, -1], 'FRD Z(Down) -> world down');
+
+// --- World chain (rotation is now a quaternion) -------------------------
+const I = { x: 0, y: 0, z: 0, w: 1 };
+const chain = [
+  { id: 'r', parent_id: null, translation: { x: 0, y: 0, z: 0 }, rotation: I, convention: 'ENU' },
+  { id: 'a', parent_id: 'r', translation: { x: 1, y: 0, z: 0 }, rotation: I, convention: 'ENU' },
+  { id: 'b', parent_id: 'a', translation: { x: 0, y: 1, z: 0 }, rotation: I, convention: 'ENU' },
+];
+let W = computeWorldMatrices(chain);
+vecClose(colVec(W.get('b'), 3), [1, 1, 0], 'nested ENU translations accumulate to (1,1,0)');
+
+const rotChain = [
+  { id: 'r', parent_id: null, translation: { x: 0, y: 0, z: 0 }, rotation: I, convention: 'ENU' },
+  { id: 'c', parent_id: 'r', translation: { x: 2, y: 0, z: 0 }, rotation: eulerToQuat(0, 0, H), convention: 'ENU' },
+];
+W = computeWorldMatrices(rotChain);
+vecClose(colVec(W.get('c'), 3), [2, 0, 0], 'yaw-90 child keeps position (2,0,0)');
+vecClose(colVec(W.get('c'), 0), [0, 1, 0], 'yaw-90 child X-axis points world +Y');
+
+const convChain = [
+  { id: 'r', parent_id: null, translation: { x: 0, y: 0, z: 0 }, rotation: I, convention: 'ENU' },
+  { id: 'd', parent_id: 'r', translation: { x: 0, y: 0, z: 0 }, rotation: I, convention: 'NED' },
+];
+W = computeWorldMatrices(convChain);
+vecClose(colVec(W.get('d'), 2), [0, 0, -1], 'NED child Z-axis points down in ENU world');
+
+// cycle is rejected
+try {
+  computeWorldMatrices([
+    { id: 'x', parent_id: 'y', translation: {x:0,y:0,z:0}, rotation: I, convention: 'ENU' },
+    { id: 'y', parent_id: 'x', translation: {x:0,y:0,z:0}, rotation: I, convention: 'ENU' },
+  ]);
+  log(false, 'cycle should throw');
+} catch (e) {
+  log(/cycle/i.test(e.message), 'cycle in chain throws');
+}
+
+// --- relative transform A->B (inv(W_A) * W_B) ---------------------------
+const relFrames = [
+  { id: 'r', parent_id: null, translation: { x: 0, y: 0, z: 0 }, rotation: I, convention: 'ENU' },
+  { id: 'A', parent_id: 'r', translation: { x: 1, y: 2, z: 0 }, rotation: I, convention: 'ENU' },
+  { id: 'B', parent_id: 'r', translation: { x: 1, y: 2, z: 3 }, rotation: I, convention: 'ENU' },
+];
+const RW = computeWorldMatrices(relFrames);
+vecClose(colVec(relativeMatrix(RW, 'A', 'B'), 3), [0, 0, 3],
+         'relative A->B translation = (0,0,3)');
+vecClose(colVec(relativeMatrix(RW, 'B', 'A'), 3), [0, 0, -3],
+         'relative B->A translation = (0,0,-3)');
+const rotRel = [
+  { id: 'r', parent_id: null, translation: { x: 0, y: 0, z: 0 }, rotation: I, convention: 'ENU' },
+  { id: 'C', parent_id: 'r', translation: { x: 0, y: 0, z: 0 }, rotation: eulerToQuat(0, 0, H), convention: 'ENU' },
+  { id: 'D', parent_id: 'r', translation: { x: 0, y: 0, z: 0 }, rotation: I, convention: 'ENU' },
+];
+const RW2 = computeWorldMatrices(rotRel);
+// C is yaw+90 vs world; D is identity. C->D is yaw-90: maps +X -> -Y.
+vecClose(colVec(relativeMatrix(RW2, 'C', 'D'), 0), [0, -1, 0],
+         'relative C->D is yaw-90 (X-axis -> -Y)');
+
+// --- legacy migration ---------------------------------------------------
+const legacy = { name: 'old', frames: [
+  { id: 'f', name: 'f', parent_id: null, translation: { x: 0, y: 0, z: 0 },
+    rotation: { roll: 0, pitch: 0, yaw: 90 }, angle_unit: 'deg', convention: 'ENU' },
+]};
+const mig = migrateConfig(legacy);
+log(mig.migrated === true, 'migrateConfig flags legacy config');
+log(!('angle_unit' in mig.config.frames[0]), 'migrateConfig drops angle_unit');
+log(!('roll' in mig.config.frames[0].rotation) && 'w' in mig.config.frames[0].rotation,
+    'migrateConfig produces a quaternion');
+log(close(mig.config.frames[0].rotation.z, 0.70710678) &&
+    close(mig.config.frames[0].rotation.w, 0.70710678),
+    'migrateConfig yaw 90deg -> (z,w) ~= 0.7071');
+log('roll' in legacy.frames[0].rotation, 'migrateConfig does not mutate the input object');
+const fresh = { name: 'n', frames: [
+  { id: 'f', name: 'f', parent_id: null, translation: { x: 0, y: 0, z: 0 },
+    rotation: { x: 0, y: 0, z: 0, w: 1 }, convention: 'ENU' },
+]};
+const mig2 = migrateConfig(fresh);
+log(mig2.migrated === false, 'migrateConfig idempotent on new schema');
+
+const sum = document.getElementById('summary');
+sum.textContent = `${passed} passed, ${failed} failed`;
+sum.className = failed ? 'fail' : 'pass';
+window.__TESTS__ = { passed, failed };
+</script>
+</body>
+</html>

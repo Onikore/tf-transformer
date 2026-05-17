@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TF Transformer — ROS2 frame configurator</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' fill='rgb(14,17,22)'/><g stroke-width='2' fill='none'><line x1='3' y1='13' x2='13' y2='13' stroke='rgb(255,68,68)'/><line x1='3' y1='13' x2='3' y2='3' stroke='rgb(85,136,255)'/><line x1='3' y1='13' x2='8' y2='8' stroke='rgb(68,221,102)'/></g></svg>">
+<link rel="stylesheet" href="/css/styles.css">
+<script type="importmap">
+{ "imports": { "three": "/vendor/three/three.module.js" } }
+</script>
+</head>
+<body>
+  <header id="topbar">
+    <span class="brand">TF&nbsp;Transformer</span>
+    <label class="cfg">Config
+      <input type="text" id="cfg-name" spellcheck="false">
+    </label>
+    <button id="btn-new">New</button>
+    <button id="btn-save">Save</button>
+    <button id="btn-load">Load…</button>
+    <button id="btn-export">Export JSON</button>
+    <button id="btn-import">Import JSON</button>
+    <span id="message" class="message"></span>
+  </header>
+
+  <main>
+    <aside id="left-panel" class="panel"></aside>
+    <section id="center">
+      <div id="viewport"></div>
+      <div class="vp-hint">drag = orbit · scroll = zoom · right-drag = pan · click a frame to select</div>
+    </section>
+    <aside id="right-panel" class="panel"></aside>
+  </main>
+
+  <dialog id="load-dialog">
+    <h3>Saved configurations</h3>
+    <div id="load-list" class="load-list"></div>
+    <menu><button id="load-close" value="cancel">Close</button></menu>
+  </dialog>
+
+  <script type="module" src="/js/main.js"></script>
+</body>
+</html>

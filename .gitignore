@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Local editor / harness settings (machine-specific)
+.claude/settings.local.json
+
+# Runtime data — saved configs are user data, not source
+configs/*.json
+!configs/.gitkeep
+
+# OS / misc
+.DS_Store
+Thumbs.db
+*.log
