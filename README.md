@@ -95,11 +95,13 @@ python -m pytest tests/test_api.py -q
 ```
 
 Math core (RPY convention, the 4 coordinate systems, world chain, cycle
-rejection) — open in a browser via a static server at the project root:
+rejection) and 3D frame picking — open in a browser via a static server at
+the project root:
 
 ```bash
 python -m http.server 8765
 # open http://127.0.0.1:8765/tests/test_transforms.html
+# open http://127.0.0.1:8765/tests/test_pick.html
 ```
 
 ## Project layout
@@ -108,5 +110,5 @@ python -m http.server 8765
 backend/    FastAPI app, Pydantic models, JSON file storage
 frontend/   index.html, css, js (state, api, math, ui panels, 3D scene), vendored three
 configs/    saved JSON configs (created on first save)
-tests/      test_api.py (pytest) + test_transforms.html (browser math tests)
+tests/      test_api.py (pytest) + test_transforms.html / test_pick.html (browser)
 ```

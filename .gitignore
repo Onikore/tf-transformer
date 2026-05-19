@@ -12,6 +12,17 @@ venv/
 configs/*.json
 !configs/.gitkeep
 
+# Build / dependency artifacts (not part of source)
+node_modules/
+dist/
+.vite/
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*~
+
 # OS / misc
 .DS_Store
 Thumbs.db
