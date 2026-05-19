@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>TF Transformer — 3D picking tests</title>
+<style>
+  body { font: 14px/1.5 monospace; background: #111; color: #ddd; padding: 1rem; }
+  .pass { color: #4ade80; }
+  .fail { color: #f87171; font-weight: bold; }
+  #summary { font-size: 18px; margin: 1rem 0; }
+  li { white-space: pre-wrap; }
+</style>
+<!-- Served from the PROJECT ROOT (python -m http.server), like
+     test_transforms.html, so the import map path is absolute. -->
+<script type="importmap">
+{ "imports": { "three": "/frontend/vendor/three/three.module.js" } }
+</script>
+</head>
+<body>
+<h1>TF Transformer — 3D picking tests</h1>
+<div id="summary">running…</div>
+<ul id="results"></ul>
+
+<script type="module">
+import * as THREE from 'three';
+
+let passed = 0, failed = 0;
+const results = document.getElementById('results');
+function log(ok, msg) {
+  const li = document.createElement('li');
+  li.className = ok ? 'pass' : 'fail';
+  li.textContent = (ok ? 'PASS  ' : 'FAIL  ') + msg;
+  results.appendChild(li);
+  ok ? passed++ : failed++;
+  if (!ok) console.error(msg);
+}
+
+// --- Rebuild the viewport scene faithfully (two frames). ----------------
+const W = 800, H = 600;
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(55, W / H, 0.01, 5000);
+camera.up.set(0, 0, 1);
+camera.position.set(3, -3, 2.5);
+camera.lookAt(0, 0, 0);
+camera.updateMatrixWorld(true);
+
+const framesGroup = new THREE.Group();
+scene.add(framesGroup);
+const pickTargets = [];
+
+// Same triad construction as scene/viewport.js makeTriad().
+function makeTriad(len, radius) {
+  const g = new THREE.Group();
+  const axis = (dir, color) => g.add(new THREE.ArrowHelper(
+    dir.clone().normalize(), new THREE.Vector3(), len, color, len * 0.25, radius * 12));
+  axis(new THREE.Vector3(1, 0, 0), 0xff4444);
+  axis(new THREE.Vector3(0, 1, 0), 0x44dd66);
+  axis(new THREE.Vector3(0, 0, 1), 0x5588ff);
+  return g;
+}
+
+// frame A at world origin, frame B offset on +X (a typical two-frame tree).
+const FRAMES = [
+  { id: 'A', pos: new THREE.Vector3(0, 0, 0) },
+  { id: 'B', pos: new THREE.Vector3(0.8, 0, 0) },
+];
+for (const f of FRAMES) {
+  const len = 0.45;
+  const node = new THREE.Group();
+  node.position.copy(f.pos);
+
+  node.add(makeTriad(len, 0.012));
+
+  // The label sprite — large, offset ABOVE the frame (old pick hazard).
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ depthTest: false }));
+  sprite.position.set(0, 0, len + 0.1);
+  sprite.scale.set(0.6, 0.3, 1);
+  node.add(sprite);
+
+  // NEW: invisible, frame-centred pick proxy (the fix).
+  const proxy = new THREE.Mesh(
+    new THREE.SphereGeometry(len, 12, 10),
+    new THREE.MeshBasicMaterial({ visible: false }));
+  proxy.userData.frameId = f.id;
+  node.add(proxy);
+  pickTargets.push(proxy);
+
+  node.userData.frameId = f.id;
+  framesGroup.add(node);
+}
+framesGroup.updateMatrixWorld(true);
+
+// --- Picking under test -------------------------------------------------
+const raycaster = new THREE.Raycaster();
+function castAt(sx, sy, targets, recursive) {
+  raycaster.setFromCamera(
+    new THREE.Vector2((sx / W) * 2 - 1, -((sy / H) * 2 - 1)), camera);
+  for (const h of raycaster.intersectObjects(targets, recursive)) {
+    let o = h.object;
+    while (o && o.userData.frameId == null) o = o.parent;
+    if (o && o.userData.frameId != null) return o.userData.frameId;
+  }
+  return null;
+}
+const pickNew = (sx, sy) => castAt(sx, sy, pickTargets, false);
+const pickOld = (sx, sy) => castAt(sx, sy, framesGroup.children, true);
+
+// Project a world point to screen pixels (same convention as pick()).
+function screenOf(world) {
+  const v = world.clone().project(camera);
+  return [((v.x * 0.5) + 0.5) * W, ((-v.y * 0.5) + 0.5) * H];
+}
+const [ax, ay] = screenOf(FRAMES[0].pos);
+const [bx, by] = screenOf(FRAMES[1].pos);
+
+// NEW picking: clicking on a frame selects THAT frame, reliably.
+log(pickNew(ax, ay) === 'A', `click on frame A → A  (got ${pickNew(ax, ay)})`);
+log(pickNew(bx, by) === 'B', `click on frame B → B  (got ${pickNew(bx, by)})`);
+
+// Clicking a bit off-centre (±10 px) still selects the same frame.
+log(pickNew(ax + 10, ay + 8) === 'A', 'click near frame A still → A');
+log(pickNew(bx - 10, by + 8) === 'B', 'click near frame B still → B');
+
+// Empty space selects nothing.
+log(pickNew(8, 8) === null, `empty corner → null  (got ${pickNew(8, 8)})`);
+
+// Disambiguation: a point between A and B but closer to A picks A, not B.
+const midCloserA = [ax + (bx - ax) * 0.3, ay + (by - ay) * 0.3];
+log(pickNew(...midCloserA) === 'A',
+    `point 30% toward B → nearest (A)  (got ${pickNew(...midCloserA)})`);
+
+// Regression documentation: the OLD recursive pick over decorative
+// geometry does NOT reliably return A for a click at A's centre — this is
+// the reported bug (thin arrows + offset label, distance-ordered).
+log(pickOld(ax, ay) !== 'A',
+    `OLD pick at frame A centre is unreliable (got ${pickOld(ax, ay)}, ` +
+    `expected ≠ A — demonstrates the bug)`);
+
+const sum = document.getElementById('summary');
+sum.textContent = `${passed} passed, ${failed} failed`;
+sum.className = failed ? 'fail' : 'pass';
+window.__TESTS__ = { passed, failed };
+</script>
+</body>
+</html>

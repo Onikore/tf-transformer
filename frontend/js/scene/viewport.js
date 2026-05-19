@@ -99,10 +99,15 @@ export function initViewport(container) {
 
   let prevCount = 0;
   const labelSprites = [];
+  // Invisible, frame-centred pick proxies. Selection ray-casts ONLY these,
+  // not the thin triad arrows or the offset label sprites — those gave an
+  // unreliable, position-ambiguous hit target.
+  const pickTargets = [];
 
   function rebuild() {
     clearGroup(framesGroup);
     labelSprites.length = 0;
+    pickTargets.length = 0;
     const frames = getFrames();
     refTriad.visible = frames.length === 0;
     if (!frames.length) {
@@ -136,6 +141,21 @@ export function initViewport(container) {
       const len = selected ? 0.7 : 0.45;
       node.add(makeTriad(len, selected ? 0.02 : 0.012));
 
+      // Generous invisible sphere centred on the frame origin — the sole
+      // click target, so clicking on/near a frame reliably selects THAT
+      // frame (nearest one wins) instead of depending on hitting a thin
+      // arrow or an offset label.
+      // Unit sphere; scalePickTargets() sizes it to a constant on-screen
+      // radius each frame so it stays clickable at any zoom without one
+      // frame's proxy eclipsing its neighbours.
+      const hitProxy = new THREE.Mesh(
+        new THREE.SphereGeometry(1, 12, 10),
+        new THREE.MeshBasicMaterial({ visible: false }),
+      );
+      hitProxy.userData.frameId = f.id;
+      node.add(hitProxy);
+      pickTargets.push(hitProxy);
+
       if (selected) {
         const ring = new THREE.Mesh(
           new THREE.SphereGeometry(0.09, 16, 12),
@@ -165,6 +185,10 @@ export function initViewport(container) {
     // Auto-fit the first time frames appear (fresh create / load into empty).
     if (prevCount === 0) fitAll();
     prevCount = frames.length;
+
+    // Size the pick proxies immediately so selection is correct on the very
+    // first click — don't wait for the next render-loop tick.
+    scalePickTargets();
   }
 
   const raycaster = new THREE.Raycaster();
@@ -174,7 +198,10 @@ export function initViewport(container) {
     mouse.x = ((ev.clientX - rect.left) / rect.width) * 2 - 1;
     mouse.y = -((ev.clientY - rect.top) / rect.height) * 2 + 1;
     raycaster.setFromCamera(mouse, camera);
-    for (const h of raycaster.intersectObjects(framesGroup.children, true)) {
+    // Raycaster doesn't refresh world matrices; do it here so a click is
+    // correct even if the render loop hasn't ticked (tab refocus, low power).
+    framesGroup.updateMatrixWorld(true);
+    for (const h of raycaster.intersectObjects(pickTargets, false)) {
       let o = h.object;
       while (o && o.userData.frameId == null) o = o.parent;
       if (o && o.userData.frameId != null) return o.userData.frameId;
@@ -218,10 +245,26 @@ export function initViewport(container) {
     }
   }
 
+  // Keep each pick proxy at a roughly constant on-screen radius (~a small
+  // click disc), clamped so neighbouring frames stay independently
+  // selectable instead of one large sphere capturing every click.
+  const PICK_K = 0.045;
+  const PICK_MIN = 0.09;
+  const PICK_MAX = 0.28;
+  function scalePickTargets() {
+    for (const p of pickTargets) {
+      p.getWorldPosition(tmpV);
+      const dist = camera.position.distanceTo(tmpV);
+      const r = Math.min(PICK_MAX, Math.max(PICK_MIN, PICK_K * dist));
+      p.scale.setScalar(r);
+    }
+  }
+
   (function loop() {
     requestAnimationFrame(loop);
     controls.update();
     scaleLabels();
+    scalePickTargets();
     renderer.render(scene, camera);
   })();
 
