@@ -26,6 +26,19 @@ Legacy configs (old `{roll,pitch,yaw}` + `angle_unit` schema) are
 backend up-converts on read), with a notice — no data loss.
 - **Top bar:** config name, New / Save / Load (server) / Export / Import JSON.
 
+## Screenshots
+
+Empty workspace — ENU reference triad and the three-pane layout (frame
+inspector · 3D view · hierarchy and queries):
+
+![Empty workspace](docs/screenshots/empty.png)
+
+A small frame tree `base → sensor → lidar` with `sensor` selected — live
+editing on the left, parent→child links in the 3D view, world pose and the
+relative-transform query on the right:
+
+![Frame tree with sensor selected](docs/screenshots/populated.png)
+
 ## Requirements
 
 - Python 3.10+
